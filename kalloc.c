@@ -30,10 +30,9 @@ struct {
 
 
 void increase(uint64 pa) {
-  //printf("incr\n");
   acquire(&references.lock);
   int index=(pa-KERNBASE)/PGSIZE;
-  if (pa>=PHYSTOP) {
+  if (((pa % PGSIZE) != 0 || (char*)pa < end || pa >= PHYSTOP)) {
     panic("invalid physical address");
   }
   if (references.ref_arr[index]<1) {
@@ -46,7 +45,6 @@ void increase(uint64 pa) {
 void
 kinit()
 { 
-  //printf("kinit\n");
   initlock(&references.lock,"references");
   initlock(&kmem.lock, "kmem");
   freerange(end, (void*)PHYSTOP);
@@ -55,7 +53,6 @@ kinit()
 void
 freerange(void *pa_start, void *pa_end)
 {
-    printf("freerange\n");
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
@@ -74,7 +71,7 @@ void
 kfree(void *pa)
 {
   struct run *r;
-  //printf("kfree\n");
+
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
@@ -86,7 +83,7 @@ kfree(void *pa)
   int index=(((uint64)pa-KERNBASE)/PGSIZE);//get the index i of the i-th page which corresponds to the specific physical address 
 
   acquire(&references.lock);
-  //printf("lock acq");
+
   if (references.ref_arr[index]<1) {
     panic("kfree: reference counter cannot be less than one");
   }
@@ -95,9 +92,9 @@ kfree(void *pa)
   release(&references.lock);
   if (temp==0) {//if no proccess "uses" this physicall address then we should add it to the freelist
     memset(pa, 1, PGSIZE);
-   //printf("try lck ");
+
     acquire(&kmem.lock);
-    //printf("lock axq ");
+
     
     r->next=kmem.freelist;//append the first element of the already existing list as the next entry of our physicall address struct run 
     kmem.freelist=r;//set the first element of the freelist to be the physical address we just freed
@@ -106,9 +103,6 @@ kfree(void *pa)
   
   
    
-   
-  
-  //release(&references.lock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -117,11 +111,10 @@ kfree(void *pa)
 void *
 kalloc(void)
 {
-  //printf("kalloc\n");
+
   struct run *r;
   acquire(&kmem.lock);
   r = kmem.freelist;
-  //release(&kmem.lock);
 
   if(r) {
     acquire(&references.lock);
@@ -131,13 +124,10 @@ kalloc(void)
   
 
   if(r) {
-    //acquire(&kmem.lock);
     kmem.freelist = r->next;
-    //release(&kmem.lock);
     memset((char*)r, 5, PGSIZE); // fill with junk
   }
   release(&kmem.lock);
-  //printf("kalloc end");
   return (void*)r;
   
 }

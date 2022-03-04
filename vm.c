@@ -15,6 +15,9 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 void increase(uint64 pa);
 
+extern char end[];
+
+
 extern char trampoline[]; // trampoline.S
 
 // Make a direct-map page table for the kernel.
@@ -306,26 +309,23 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   uint64 pa,i;
   uint flags;
 
-//printf("umvcopy\n");
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+    if (((pa % PGSIZE) != 0 || (char*)pa < end || pa >= PHYSTOP))  {
+      panic("umvcopy: invalid physical address");
+    }
     *pte &=~PTE_W;
     flags = PTE_FLAGS(*pte);
-    //if((mem = kalloc()) == 0)
-    //  goto err;
-    //memmove(mem, (char*)pa, PGSIZE);
     increase(pa);
     if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
-      //kfree((void*)pa);
       goto err;
     }
     
   }
-  //printf("umvcopy end\n");
   return 0;
 
  err:
@@ -350,36 +350,36 @@ uvmclear(pagetable_t pagetable, uint64 va)
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
 
-int tests(pagetable_t paget,uint64 virtual_addr);
 
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
 
-//printf("copyout\n");
+
   while(len > 0){
     
     va0 = PGROUNDDOWN(dstva);
-    if (va0>=MAXVA) {
+    //same as usetrap 15 cause
+    if (va0>=MAXVA || va0<0) {
       return -1;
     }
     pte_t* pte=walk(pagetable,va0,0);
     uint64 new;
     uint flags;
 
-    if (pte==0) {
+    if (pte<=0) {
       return -1;
     }
     if ((*pte & PTE_V)==0 || (*pte & PTE_U)==0) {
       return -1;
     }
     pa0=PTE2PA(*pte);
-    if (pa0==0 || pa0>=PHYSTOP) {
+    if (((pa0 % PGSIZE) != 0 || (char*)pa0 < end || pa0 >= PHYSTOP)) {
       return -1;
     }
 
-    if ((*pte & PTE_W)==0) {
+    if ((*pte & PTE_W)==0) {//give a WRITE permission to a read only page
       new=(uint64)kalloc();
       if (new==0) {
         return -1;
@@ -403,7 +403,6 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     src += n;
     dstva = va0 + PGSIZE;
   }
-  //printf("copyout end\n");
   return 0;
 }
 

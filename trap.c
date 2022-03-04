@@ -11,6 +11,8 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+extern char end[];
+
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -33,69 +35,6 @@ trapinithart(void)
 }
 
 
-
-int tests(pagetable_t paget,uint64 virtual_addr) {
-  pte_t *pte;
-    uint64 new_page;
-    uint64 physical_addr;
-    uint flags;
-    //printf("usertrap\n");
-
-    if (virtual_addr>=MAXVA)  {
-      return -1;
-    }
-
-    pte=walk(paget,virtual_addr,0);
-    if (pte==0) {
-      return -1;
-    }
-    if((*pte & PTE_V)==0) {
-      return -1;
-    } 
-    if ((*pte & PTE_U)==0) {
-      return -1;
-    }
-    //if ((*pte & PTE_W)!=0) {
-    //  return -1;
-    //}
-    //flags=PTE_FLAGS(*pte);
-
-    physical_addr=PTE2PA(*pte);
-    if (physical_addr==0 || physical_addr>=PHYSTOP)  {
-      return -1;
-    }
-
-    new_page=(uint64)kalloc();//allocate page for process that tried to write to the read-only page
-    if (new_page==0) {//kalloc failed 
-      return -1;
-    }
-
-    flags=PTE_FLAGS(*pte);
-
-    //kalloc succeded so we make the new page to the physicall address of the process
-    memmove((void*)new_page,(void*)physical_addr,PGSIZE);
-    //flags &= PTE_W;
-
-    //printf("here\n");
-    *pte=PA2PTE(new_page);
-    *pte |= flags;
-    //*pte |=PTE_V;
-    *pte |=PTE_W;
-    //*pte |=PTE_U;
-    //*pte |=PTE_X;
-    //*pte |=PTE_R;
-    //if (mappages(p->pagetable,wrong_physical_addr,PGSIZE,new_page,flags)!=0) {
-    //  kfree((void*)new_page);
-    //  panic("usertrap: mappages error");
-    //}
-
-    //flags=PTE_FLAGS(*pte);
-    //flags&=PTE_W;// set the flags of the new page table entry so that the proccess can write on it
-
-    kfree((void*)physical_addr);//add the phycicall address to the freelist or reduce it's reference counter depending on the case 
-    //printf("usertrap end\n");
-  return 0;
-}
 
 
 //
@@ -136,9 +75,52 @@ usertrap(void)
     syscall();
   } 
   else if (r_scause()==15) {
-    if (tests(p->pagetable,r_stval())<0) {
-      p->killed=1;
+    pte_t *pte;
+    uint64 new_page;
+    uint64 physical_addr,virtual_addr;
+    uint flags;
+    
+    virtual_addr=r_stval();
+
+
+    if (virtual_addr>=MAXVA || virtual_addr<0)  {
+      exit(-1);
     }
+
+    pte=walk(p->pagetable,virtual_addr,0);
+    if (pte<=0) {
+      exit(-1);
+    }
+    if((*pte & PTE_V)==0) {
+      exit(-1);
+    } 
+    if ((*pte & PTE_U)==0) {
+      exit(-1);
+    }
+    if ((*pte & PTE_W)!=0) {//can't have WRITE PERMISSION
+      exit(-1);
+    }
+
+    physical_addr=PTE2PA(*pte);
+    if ((physical_addr % PGSIZE) != 0 || (char*)physical_addr < end || physical_addr >= PHYSTOP)  {
+      exit(-1);
+    }
+
+    new_page=(uint64)kalloc();//allocate page for process that tried to write to the read-only page
+    if (new_page==0) {//kalloc failed 
+      exit(-1);
+    }
+
+    flags=PTE_FLAGS(*pte);
+
+    memmove((void*)new_page,(void*)physical_addr,PGSIZE);
+
+    *pte=PA2PTE(new_page);
+    *pte |= flags;//get the same flags as previous page
+    *pte |= PTE_W;//with an extra WRITE permission
+
+    kfree((void*)physical_addr);//add the previous physical address to the freelist or reduce it's reference counter depending on the case 
+
   }
   else if((which_dev = devintr()) != 0){
     // ok
